@@ -87,10 +87,23 @@ class GCPGeminiProvider(BaseLLMProvider):
                 if parts:
                     contents.append(types.Content(role="user", parts=parts))
 
-        # 2. Build configuration with tools and system instructions
+        # 2. Convert Python callables into FunctionDeclarations to avoid SDK AFC interference
+        gemini_tools = None
+        if tools:
+            func_decls = []
+            for t in tools:
+                if callable(t):
+                    func_decls.append(
+                        types.FunctionDeclaration.from_callable(callable=t, client=self.client)
+                    )
+                elif isinstance(t, types.FunctionDeclaration):
+                    func_decls.append(t)
+            if func_decls:
+                gemini_tools = [types.Tool(function_declarations=func_decls)]
+
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            tools=tools if tools else None,
+            tools=gemini_tools,
             temperature=0.0
         )
 
@@ -114,7 +127,14 @@ class GCPGeminiProvider(BaseLLMProvider):
                     )
                 )
 
+        text_content = None
+        if not tool_calls:
+            try:
+                text_content = response.text
+            except Exception:
+                text_content = None
+
         return ProviderResponse(
-            text=response.text,
+            text=text_content,
             tool_calls=tool_calls
         )

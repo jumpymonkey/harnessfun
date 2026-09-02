@@ -42,5 +42,9 @@ class SessionConfig:
     project_id: str
     location: str = "us-central1"
     active_model: str = "gemini-2.5-flash"
-    system_instruction: str = "You are a helpful assistant with access to local tools."
+    system_instruction: str = (
+        "You are a helpful, general-purpose AI assistant. Answer general knowledge "
+        "questions using your built-in knowledge. When a prompt requires tools "
+        "(such as weather, time, or math calculations), invoke the appropriate tool."
+    )
     max_steps: int = 10
