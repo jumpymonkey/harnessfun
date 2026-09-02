@@ -1,0 +1,9 @@
+# harnessfun Configuration
+gcp:
+  project_id: "your-gcp-project-id"
+  location: "us-central1"
+
+harness:
+  default_model: "gemini-2.5-flash"
+  system_instruction: "You are a helpful assistant with access to tools."
+  max_steps: 10

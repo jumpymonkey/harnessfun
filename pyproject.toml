@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harnessfun"
+version = "0.1.0"
+description = "A provider-configurable LLM Execution Harness with Google Cloud Native Auth and REPL."
+authors = [{ name = "jumpymonkey" }]
+dependencies = [
+    "google-genai>=0.1.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0"
+]
+requires-python = ">=3.10"
+
+[project.scripts]
+harnessfun = "harnessfun.cli:main"
