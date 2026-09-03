@@ -69,6 +69,7 @@ gcp:
 
 harness:
   default_model: "gemini-2.5-flash"
+  model_location: "global"
   system_instruction: "You are a helpful assistant with access to local tools."
   max_steps: 10
 ```
@@ -121,7 +122,7 @@ harnessfun chat --model gemini-2.5-flash
 ```text
 ╭─────────────────────────────────────────────────────────────────╮
 │ harnessfun Interactive REPL v0.1.0                              │
-│ GCP Project: my-gcp-project-123 | Region: us-central1          │
+│ GCP Project: my-gcp-project-123 | Region: us-central1           │
 │ Active Model: gemini-2.5-flash                                  │
 │ Type /help for available commands or /exit to quit.            │
 ╰─────────────────────────────────────────────────────────────────╯

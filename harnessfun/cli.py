@@ -55,17 +55,22 @@ def auth_check():
 
 @cli.command()
 @click.option("--project", "-p", help="GCP Project ID.")
-@click.option("--location", "-l", default="us-central1", help="GCP Location/Region.")
-def models_list(project, location):
+@click.option("--location", "-l", help="GCP Location/Region.")
+@click.option("--model-location", help="Location used to reach Gemini models (default: global).")
+def models_list(project, location, model_location):
     """List all available Gemini models in the active GCP project/region."""
     try:
-        cfg = load_config(project_id=project, location=location)
-        provider = GCPGeminiProvider(project_id=cfg.project_id, location=cfg.location)
+        cfg = load_config(
+            project_id=project,
+            location=location,
+            model_location=model_location or location
+        )
+        provider = GCPGeminiProvider(project_id=cfg.project_id, location=cfg.model_location)
         
-        console.print(f"[bold blue]Querying Vertex AI models for project '{cfg.project_id}'...[/bold blue]")
+        console.print(f"[bold blue]Querying Vertex AI models for project '{cfg.project_id}' ({cfg.model_location})...[/bold blue]")
         models = provider.list_models()
         
-        table = Table(title=f"Available Gemini Models ({cfg.project_id} / {cfg.location})")
+        table = Table(title=f"Available Gemini Models ({cfg.project_id} / {cfg.model_location})")
         table.add_column("Model Identifier", style="cyan")
         table.add_column("Status", style="green")
         
@@ -83,11 +88,17 @@ def models_list(project, location):
 @click.option("--model", "-m", help="Gemini model ID to use.")
 @click.option("--project", "-p", help="GCP Project ID.")
 @click.option("--location", "-l", help="GCP Location/Region.")
-def run(prompt, model, project, location):
+@click.option("--model-location", help="Location used to reach Gemini models (default: global).")
+def run(prompt, model, project, location, model_location):
     """Execute a single one-shot prompt."""
     try:
-        cfg = load_config(project_id=project, location=location, model=model)
-        provider = GCPGeminiProvider(project_id=cfg.project_id, location=cfg.location)
+        cfg = load_config(
+            project_id=project,
+            location=location,
+            model_location=model_location,
+            model=model
+        )
+        provider = GCPGeminiProvider(project_id=cfg.project_id, location=cfg.model_location)
         harness = UniversalHarness(provider=provider, config=cfg)
         
         console.print(f"[dim]Running model '{cfg.active_model}' on project '{cfg.project_id}'...[/dim]\n")
@@ -102,11 +113,17 @@ def run(prompt, model, project, location):
 @click.option("--model", "-m", help="Initial Gemini model ID to use.")
 @click.option("--project", "-p", help="GCP Project ID.")
 @click.option("--location", "-l", help="GCP Location/Region.")
-def chat(model, project, location):
+@click.option("--model-location", help="Location used to reach Gemini models (default: global).")
+def chat(model, project, location, model_location):
     """Start an interactive REPL session with on-the-fly model switching."""
     try:
-        cfg = load_config(project_id=project, location=location, model=model)
-        provider = GCPGeminiProvider(project_id=cfg.project_id, location=cfg.location)
+        cfg = load_config(
+            project_id=project,
+            location=location,
+            model_location=model_location,
+            model=model
+        )
+        provider = GCPGeminiProvider(project_id=cfg.project_id, location=cfg.model_location)
         harness = UniversalHarness(provider=provider, config=cfg, registry=default_registry)
     except Exception as e:
         console.print(f"[bold red]Failed to initialize harness session:[/bold red] {e}")
@@ -195,6 +212,7 @@ def chat(model, project, location):
                     console.print(
                         f"[bold]Project ID:[/bold] {cfg.project_id}\n"
                         f"[bold]Location:[/bold] {cfg.location}\n"
+                        f"[bold]Model Location:[/bold] {cfg.model_location}\n"
                         f"[bold]Active Model:[/bold] {harness.config.active_model}\n"
                         f"[bold]Max Steps:[/bold] {cfg.max_steps}"
                     )

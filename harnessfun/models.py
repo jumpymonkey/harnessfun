@@ -41,6 +41,7 @@ class SessionConfig:
     """Configuration settings for a harness execution session."""
     project_id: str
     location: str = "us-central1"
+    model_location: str = "global"
     active_model: str = "gemini-2.5-flash"
     system_instruction: str = (
         "You are a helpful, general-purpose AI assistant. Answer general knowledge "

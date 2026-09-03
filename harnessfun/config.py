@@ -60,6 +60,7 @@ def load_config(
     config_path: Optional[str] = None,
     project_id: Optional[str] = None,
     location: Optional[str] = None,
+    model_location: Optional[str] = None,
     model: Optional[str] = None
 ) -> SessionConfig:
     """Loads session configuration from YAML config file, CLI args, and env vars."""
@@ -92,6 +93,14 @@ def load_config(
         gcp_cfg.get("location", "us-central1")
     )
 
+    final_model_location = (
+        model_location or
+        os.environ.get("GEMINI_LOCATION") or
+        os.environ.get("GOOGLE_CLOUD_MODEL_LOCATION") or
+        harness_cfg.get("model_location") or
+        gcp_cfg.get("model_location", "global")
+    )
+
     final_model = (
         model or 
         os.environ.get("HARNESS_MODEL") or 
@@ -101,6 +110,7 @@ def load_config(
     return SessionConfig(
         project_id=final_project,
         location=final_location,
+        model_location=final_model_location,
         active_model=final_model,
         system_instruction=harness_cfg.get(
             "system_instruction", 

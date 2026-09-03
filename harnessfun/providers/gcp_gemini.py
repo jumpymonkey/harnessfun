@@ -11,7 +11,7 @@ from harnessfun.providers.base import BaseLLMProvider
 class GCPGeminiProvider(BaseLLMProvider):
     """Adapter for Google Gemini models via GCP Vertex AI & Application Default Credentials."""
 
-    def __init__(self, project_id: str, location: str = "us-central1"):
+    def __init__(self, project_id: str, location: str = "global"):
         self.project_id = project_id
         self.location = location
         # Initialize Google GenAI client in Vertex AI mode using ADC
