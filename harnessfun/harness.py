@@ -113,6 +113,7 @@ class UniversalHarness:
                         role="assistant",
                         content=response.text,
                         tool_calls=response.tool_calls,
+                        raw_parts=getattr(response, "raw_parts", None),
                     )
                 )
 
@@ -154,7 +155,11 @@ class UniversalHarness:
             # Case B: Provider returned text answer (final completion)
             elif response.text:
                 self.messages.append(
-                    Message(role="assistant", content=response.text)
+                    Message(
+                        role="assistant",
+                        content=response.text,
+                        raw_parts=getattr(response, "raw_parts", None),
+                    )
                 )
                 yield self._emit(
                     HarnessEvent(

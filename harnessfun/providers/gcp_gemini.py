@@ -63,25 +63,38 @@ class GCPGeminiProvider(BaseLLMProvider):
                     )
                 )
             elif msg.role == "assistant":
-                parts = []
-                if msg.content:
-                    parts.append(types.Part.from_text(text=msg.content))
-                for tc in msg.tool_calls:
-                    parts.append(
-                        types.Part.from_function_call(
+                # Prefer exact raw parts if available to preserve full reasoning/thoughts/signatures
+                if getattr(msg, "raw_parts", None) and all(isinstance(p, types.Part) for p in msg.raw_parts):
+                    contents.append(types.Content(role="model", parts=list(msg.raw_parts)))
+                else:
+                    parts = []
+                    if msg.content:
+                        parts.append(types.Part.from_text(text=msg.content))
+                    for tc in msg.tool_calls:
+                        part = types.Part.from_function_call(
                             name=tc.name,
                             args=tc.args
                         )
-                    )
-                if parts:
-                    contents.append(types.Content(role="model", parts=parts))
+                        sig = getattr(tc, "thought_signature", None)
+                        if sig is not None:
+                            if isinstance(sig, str):
+                                try:
+                                    import base64
+                                    sig = base64.b64decode(sig)
+                                except Exception:
+                                    sig = sig.encode("utf-8")
+                            part.thought_signature = sig
+                        parts.append(part)
+                    if parts:
+                        contents.append(types.Content(role="model", parts=parts))
             elif msg.role == "tool":
                 parts = []
                 for tr in msg.tool_results:
+                    resp_dict = tr.output if isinstance(tr.output, dict) else {"result": tr.output}
                     parts.append(
                         types.Part.from_function_response(
                             name=tr.name,
-                            response=tr.output
+                            response=resp_dict
                         )
                     )
                 if parts:
@@ -114,9 +127,30 @@ class GCPGeminiProvider(BaseLLMProvider):
             config=config
         )
 
-        # 4. Extract function calls if any
+        # 4. Extract function calls, thought signatures, raw parts, and text
         tool_calls: List[ToolCall] = []
-        if response.function_calls:
+        raw_parts: List[types.Part] = []
+        thought_texts: List[str] = []
+
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+            raw_parts = list(response.candidates[0].content.parts)
+            for idx, part in enumerate(raw_parts):
+                if getattr(part, "thought", False) and getattr(part, "text", None):
+                    thought_texts.append(part.text)
+                if part.function_call:
+                    call = part.function_call
+                    args_dict = dict(call.args) if call.args else {}
+                    tool_calls.append(
+                        ToolCall(
+                            id=f"call_{idx}_{call.name}",
+                            name=call.name,
+                            args=args_dict,
+                            thought_signature=part.thought_signature
+                        )
+                    )
+
+        # Fallback if candidates were not structured or tool_calls empty but function_calls present
+        if not tool_calls and response.function_calls:
             for idx, call in enumerate(response.function_calls):
                 args_dict = dict(call.args) if call.args else {}
                 tool_calls.append(
@@ -128,13 +162,17 @@ class GCPGeminiProvider(BaseLLMProvider):
                 )
 
         text_content = None
-        if not tool_calls:
-            try:
-                text_content = response.text
-            except Exception:
-                text_content = None
+        try:
+            text_content = response.text
+        except Exception:
+            text_content = None
+
+        # If model returned thoughts alongside tool calls or instead of text, capture thought
+        if not text_content and thought_texts:
+            text_content = "\n".join(thought_texts)
 
         return ProviderResponse(
             text=text_content,
-            tool_calls=tool_calls
+            tool_calls=tool_calls,
+            raw_parts=raw_parts if raw_parts else None
         )

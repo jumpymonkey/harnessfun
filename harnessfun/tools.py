@@ -29,11 +29,17 @@ class ToolRegistry:
 
     def execute(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """Executes a registered tool safely and returns a dictionary output."""
-        if name not in self.tools:
+        actual_name = name
+        if actual_name not in self.tools and ":" in actual_name:
+            stripped = actual_name.split(":", 1)[-1]
+            if stripped in self.tools:
+                actual_name = stripped
+
+        if actual_name not in self.tools:
             return {"error": f"Tool '{name}' not found in registry."}
 
         try:
-            func = self.tools[name]
+            func = self.tools[actual_name]
             result = func(**args)
             if isinstance(result, dict):
                 return result

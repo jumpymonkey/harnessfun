@@ -18,6 +18,7 @@ class ToolCall:
     id: str
     name: str
     args: Dict[str, Any]
+    thought_signature: Optional[Any] = None
 
 
 @dataclass
@@ -35,6 +36,7 @@ class Message:
     content: Optional[str] = None
     tool_calls: List[ToolCall] = field(default_factory=list)
     tool_results: List[ToolResult] = field(default_factory=list)
+    raw_parts: Optional[List[Any]] = None
 
 
 @dataclass
@@ -42,6 +44,7 @@ class ProviderResponse:
     """Normalized response returned by LLM providers."""
     text: Optional[str] = None
     tool_calls: List[ToolCall] = field(default_factory=list)
+    raw_parts: Optional[List[Any]] = None
 
 
 @dataclass
