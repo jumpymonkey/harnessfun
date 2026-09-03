@@ -19,12 +19,13 @@ class AuthError(Exception):
 
 def validate_no_api_keys() -> None:
     """Enforces prohibition of static API keys."""
-    if "GEMINI_API_KEY" in os.environ:
-        raise SecurityValidationError(
-            "Security Policy Error: GEMINI_API_KEY detected in environment variables. "
-            "harnessfun strictly prohibits API key usage and requires Google Cloud "
-            "Application Default Credentials (ADC) or Service Account authentication."
-        )
+    for key in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
+        if key in os.environ:
+            raise SecurityValidationError(
+                f"Security Policy Error: {key} detected in environment variables. "
+                "harnessfun strictly prohibits API key usage and requires Google Cloud "
+                "Application Default Credentials (ADC) or Service Account authentication."
+            )
 
 
 def verify_gcp_adc() -> Tuple[Any, str]:

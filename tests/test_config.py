@@ -13,9 +13,18 @@ def test_api_key_prohibition(monkeypatch):
     assert "GEMINI_API_KEY detected" in str(exc_info.value)
 
 
+def test_anthropic_api_key_prohibition(monkeypatch):
+    """Ensures ANTHROPIC_API_KEY presence raises SecurityValidationError."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "insecure-test-key")
+    with pytest.raises(SecurityValidationError) as exc_info:
+        validate_no_api_keys()
+    assert "ANTHROPIC_API_KEY detected" in str(exc_info.value)
+
+
 def test_valid_env_when_no_api_key(monkeypatch):
-    """Ensures validate_no_api_keys passes when GEMINI_API_KEY is not set."""
+    """Ensures validate_no_api_keys passes when no API keys are set."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     # Should not raise exception
     validate_no_api_keys()
 

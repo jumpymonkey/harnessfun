@@ -1,7 +1,15 @@
-"""Normalized Data Models for harnessfun."""
-
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class HarnessEvent:
+    """Represents an execution event emitted by UniversalHarness."""
+    type: str  # e.g., "step_start", "model_thought", "tool_call", "tool_result", "turn_complete", "error"
+    step: int
+    data: Dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
