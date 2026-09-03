@@ -15,9 +15,16 @@ try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     from mcp.client.sse import sse_client
+    try:
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp.shared._httpx_utils import create_mcp_http_client
+        HAS_STREAMABLE_HTTP = True
+    except ImportError:
+        HAS_STREAMABLE_HTTP = False
     HAS_MCP_SDK = True
 except ImportError:
     HAS_MCP_SDK = False
+    HAS_STREAMABLE_HTTP = False
 
 from harnessfun.models import ToolDefinition
 
@@ -28,7 +35,7 @@ logger = logging.getLogger(__name__)
 class MCPServerConfig:
     """Configuration for an MCP server connection."""
     name: str
-    transport: str = "stdio"  # "stdio" or "sse"
+    transport: str = "stdio"  # "stdio", "sse", "http", or "streamable_http"
     command: Optional[str] = None
     args: List[str] = field(default_factory=list)
     env: Optional[Dict[str, str]] = None
@@ -105,7 +112,7 @@ class MCPClientManager:
         url: str,
         headers: Optional[Dict[str, str]] = None,
     ) -> List[ToolDefinition]:
-        """Connects to a remote SSE/HTTP-based MCP server."""
+        """Connects to a remote SSE-based MCP server."""
         cfg = MCPServerConfig(
             name=name,
             transport="sse",
@@ -113,6 +120,50 @@ class MCPClientManager:
             headers=headers,
         )
         return self.connect_server(cfg)
+
+    def connect_http(
+        self,
+        name: str,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> List[ToolDefinition]:
+        """Connects to a remote Streamable HTTP-based MCP server."""
+        cfg = MCPServerConfig(
+            name=name,
+            transport="http",
+            url=url,
+            headers=headers,
+        )
+        return self.connect_server(cfg)
+
+    def connect_url(
+        self,
+        name: str,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        transport: Optional[str] = None,
+    ) -> List[ToolDefinition]:
+        """Connects to a remote MCP server via Streamable HTTP or SSE, with automatic transport fallback."""
+        chosen_transport = transport
+        if not chosen_transport:
+            if "/sse" in url.lower():
+                chosen_transport = "sse"
+            else:
+                chosen_transport = "http"
+
+        cfg = MCPServerConfig(
+            name=name,
+            transport=chosen_transport,
+            url=url,
+            headers=headers,
+        )
+        try:
+            return self.connect_server(cfg)
+        except Exception as e:
+            alt_transport = "http" if chosen_transport == "sse" else "sse"
+            logger.info("Connection to %s using %s failed (%s); trying %s fallback.", url, chosen_transport, e, alt_transport)
+            cfg.transport = alt_transport
+            return self.connect_server(cfg)
 
     async def _connect_server_async(self, config: MCPServerConfig) -> List[ToolDefinition]:
         """Async implementation of MCP server connection handshake and tool discovery."""
@@ -128,12 +179,50 @@ class MCPClientManager:
         server_session._exit_stack = exit_stack
 
         try:
-            if config.transport == "sse":
+            headers = dict(config.headers or {})
+            # Auto-acquire GCP ADC credentials if connecting to a Google Cloud endpoint without explicit auth
+            if config.url and "googleapis.com" in config.url and "Authorization" not in headers:
+                try:
+                    import google.auth
+                    import google.auth.transport.requests
+                    creds, pid = google.auth.default()
+                    creds.refresh(google.auth.transport.requests.Request())
+                    if creds.token:
+                        headers["Authorization"] = f"Bearer {creds.token}"
+                    if pid and "x-goog-user-project" not in headers:
+                        headers["x-goog-user-project"] = pid
+                except Exception as e:
+                    logger.warning("Could not auto-acquire GCP ADC credentials for %s: %s", config.url, e)
+
+            if config.transport in ("http", "streamable_http"):
+                if not config.url:
+                    raise ValueError(f"MCP server '{name}' missing 'url' for HTTP transport.")
+                if not HAS_STREAMABLE_HTTP:
+                    raise RuntimeError("Streamable HTTP transport is not available in the installed 'mcp' package.")
+                http_client = await exit_stack.enter_async_context(
+                    create_mcp_http_client(headers=headers)
+                )
+                streams = await exit_stack.enter_async_context(
+                    streamable_http_client(url=config.url, http_client=http_client)
+                )
+            elif config.transport == "sse":
                 if not config.url:
                     raise ValueError(f"MCP server '{name}' missing 'url' for SSE transport.")
-                streams = await exit_stack.enter_async_context(
-                    sse_client(url=config.url, headers=config.headers)
-                )
+                try:
+                    streams = await exit_stack.enter_async_context(
+                        sse_client(url=config.url, headers=headers)
+                    )
+                except Exception as sse_err:
+                    if HAS_STREAMABLE_HTTP and ("405" in str(sse_err) or "Method Not Allowed" in str(sse_err)):
+                        logger.info("SSE connection to '%s' failed with 405; falling back to Streamable HTTP.", config.url)
+                        http_client = await exit_stack.enter_async_context(
+                            create_mcp_http_client(headers=headers)
+                        )
+                        streams = await exit_stack.enter_async_context(
+                            streamable_http_client(url=config.url, http_client=http_client)
+                        )
+                    else:
+                        raise
             else:
                 # Default: stdio transport
                 if not config.command:
@@ -307,7 +396,11 @@ class MCPClientManager:
             res.append({
                 "name": name,
                 "transport": srv.config.transport,
-                "target": srv.config.url if srv.config.transport == "sse" else f"{srv.config.command} {' '.join(srv.config.args)}".strip(),
+                "target": (
+                    srv.config.url
+                    if srv.config.transport in ("sse", "http", "streamable_http")
+                    else f"{srv.config.command} {' '.join(srv.config.args)}".strip()
+                ),
                 "status": srv.status,
                 "error": srv.error,
                 "tool_count": len(srv.tools),
@@ -351,7 +444,7 @@ class MCPClientManager:
             if not isinstance(srv_body, dict):
                 continue
 
-            transport = srv_body.get("transport", "stdio")
+            transport = str(srv_body.get("transport", "stdio")).lower()
             url = srv_body.get("url")
             command = srv_body.get("command")
             args = srv_body.get("args", [])
@@ -359,10 +452,11 @@ class MCPClientManager:
             cwd = srv_body.get("cwd")
             headers = srv_body.get("headers")
 
-            if url and (transport == "sse" or not command):
+            if url and (transport in ("http", "streamable_http", "sse") or not command):
+                target_transport = transport if transport in ("http", "streamable_http", "sse") else "http"
                 cfg = MCPServerConfig(
                     name=srv_name,
-                    transport="sse",
+                    transport=target_transport,
                     url=url,
                     headers=headers,
                 )

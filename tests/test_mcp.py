@@ -336,3 +336,44 @@ def test_cli_help_options():
     res_chat = runner.invoke(cli, ["chat", "--help"])
     assert res_chat.exit_code == 0
     assert "--mcp-config" in res_chat.output
+
+
+def test_mcp_http_and_url_connection():
+    """Verify HTTP transport configuration and connect_url dispatch."""
+    manager = MCPClientManager()
+    try:
+        # Test config parsing with transport: http
+        cfg_dict = {
+            "mcpServers": {
+                "bigquery": {
+                    "transport": "http",
+                    "url": "https://bigquery.googleapis.com/mcp",
+                    "headers": {"x-test": "123"},
+                }
+            }
+        }
+        with patch.object(manager, "connect_server", return_value=[
+            ToolDefinition(name="bigquery__execute_sql", description="SQL tool", parameters={}, handler=lambda: {}, server_name="bigquery")
+        ]) as mock_conn:
+            res = manager.load_config_dict(cfg_dict)
+            assert "bigquery" in res
+            assert mock_conn.called
+            config_passed: MCPServerConfig = mock_conn.call_args[0][0]
+            assert config_passed.transport == "http"
+            assert config_passed.url == "https://bigquery.googleapis.com/mcp"
+            assert config_passed.headers == {"x-test": "123"}
+
+        # Test connect_url method default choosing http
+        with patch.object(manager, "connect_server", return_value=[]) as mock_conn:
+            manager.connect_url("test_api", "https://api.example.com/mcp")
+            config_passed = mock_conn.call_args[0][0]
+            assert config_passed.transport == "http"
+
+        # Test connect_url with /sse in url
+        with patch.object(manager, "connect_server", return_value=[]) as mock_conn:
+            manager.connect_url("test_sse", "https://api.example.com/sse")
+            config_passed = mock_conn.call_args[0][0]
+            assert config_passed.transport == "sse"
+    finally:
+        manager.close()
+

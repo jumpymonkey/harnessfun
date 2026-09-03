@@ -100,7 +100,7 @@ def _show_mcp_help() -> None:
     table.add_column("Description")
     table.add_row("/mcp list", "List all configured MCP servers and their connection statuses.")
     table.add_row("/mcp connect <name> <cmd> [args...]", "Connect to a stdio MCP server (e.g. /mcp connect sqlite uvx mcp-server-sqlite --db-path ./test.db).")
-    table.add_row("/mcp connect-url <name> <url>", "Connect to an SSE/HTTP MCP server (e.g. /mcp connect-url web http://localhost:8000/sse).")
+    table.add_row("/mcp connect-url <name> <url> [H=V...]", "Connect to an HTTP/SSE MCP server (e.g. /mcp connect-url bigquery https://bigquery.googleapis.com/mcp).")
     table.add_row("/mcp disconnect <name>", "Disconnect an MCP server and unregister all its tools.")
     table.add_row("/mcp tools [server]", "List all tools discovered from active MCP servers.")
     table.add_row("/mcp load <filepath>", "Load and connect servers declared in a JSON or YAML config file.")
@@ -172,16 +172,24 @@ def _handle_mcp_command(arg: str, harness: UniversalHarness, mcp_manager: MCPCli
 
     elif subcmd == "connect-url":
         if len(parts) < 3:
-            console.print("[bold red]Usage:[/bold red] /mcp connect-url <name> <url>")
-            console.print("[dim]Example: /mcp connect-url web http://localhost:8000/sse[/dim]")
+            console.print("[bold red]Usage:[/bold red] /mcp connect-url <name> <url> [Header=Value ...]")
+            console.print("[dim]Example: /mcp connect-url bigquery https://bigquery.googleapis.com/mcp[/dim]")
             return
 
         name = parts[1]
         url = parts[2]
+        headers: Dict[str, str] = {}
+        for p in parts[3:]:
+            if ":" in p:
+                k, v = p.split(":", 1)
+                headers[k.strip()] = v.strip()
+            elif "=" in p:
+                k, v = p.split("=", 1)
+                headers[k.strip()] = v.strip()
 
-        console.print(f"[dim]Connecting to MCP server '{name}' via SSE ({url})...[/dim]")
+        console.print(f"[dim]Connecting to MCP server '{name}' ({url})...[/dim]")
         try:
-            tools = mcp_manager.connect_sse(name=name, url=url)
+            tools = mcp_manager.connect_url(name=name, url=url, headers=headers)
             for t in tools:
                 harness.registry.register_tool_definition(t)
             console.print(f"[bold green]✓ Successfully connected to '{name}' ({len(tools)} tools registered):[/bold green]")

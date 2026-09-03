@@ -257,6 +257,10 @@ harnessfun run "Query table users" --mcp-config ./mcp_servers.json
 ```json
 {
   "mcpServers": {
+    "bigquery": {
+      "transport": "http",
+      "url": "https://bigquery.googleapis.com/mcp"
+    },
     "sqlite": {
       "command": "uvx",
       "args": ["mcp-server-sqlite", "--db-path", "./test.db"]
@@ -267,6 +271,12 @@ harnessfun run "Query table users" --mcp-config ./mcp_servers.json
   }
 }
 ```
+
+> **Note on Google Cloud Managed MCP (e.g., BigQuery):**
+> `https://bigquery.googleapis.com/mcp` uses the MCP Streamable HTTP transport and requires Google Cloud authentication. When connecting in `harnessfun` without custom headers, your active Google Cloud Application Default Credentials (ADC) token and project are automatically acquired and used. You can also connect directly in chat with:
+> ```text
+> /mcp connect-url bigquery https://bigquery.googleapis.com/mcp
+> ```
 
 
 ---
