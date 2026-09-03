@@ -14,8 +14,10 @@
 - **Interactive REPL Session:** Chat interactively in a persistent terminal session (`harnessfun chat`) with on-the-fly model switching (`/model`), history management (`/clear`, `/history`), tool inspection (`/tools`), and custom system prompts (`/system`).
 - **Event-Driven Streaming Pipeline:** Granular step lifecycle events (`step_start`, `model_thought`, `tool_call`, `tool_result`, `turn_complete`, `error`) streamed in real-time.
 - **Model Thought & Rationale Preservation:** Captures and displays chain-of-thought and reasoning rationale generated alongside tool calls.
+- **MCP (Model Context Protocol) Integration:** Native support for connecting external MCP servers via `stdio` and `sse` transports, discovering tools dynamically, and calling them across both Gemini and Claude models.
+- **Interactive `/mcp` Management:** Register, list, inspect, and disconnect MCP servers interactively within the live REPL (`/mcp connect`, `/mcp list`, `/mcp tools`, `/mcp disconnect`, `/mcp load`).
 - **Trajectory Export & Auditing:** Export full session traces to JSONL (`--trace <path>`, `/export <path>`, or `.export_trajectory_jsonl()`) for debugging, evaluation benchmarks, and deterministic replays.
-- **Tool Registry & Execution Loop:** Decorator-based tool registration (`@registry.register`) with automatic multi-step tool calling loop management across both Gemini and Claude models.
+- **Tool Registry & Execution Loop:** Decorator-based tool registration (`@registry.register`) and `ToolDefinition` management with automatic multi-step tool calling loop across Gemini and Claude models.
 - **Provider-Agnostic Architecture:** Built with a generic `BaseLLMProvider` interface to support multi-provider adapters.
 
 ---
@@ -200,10 +202,71 @@ Inside `harnessfun chat`, the following slash commands are available:
 | `/history` | `/history` | Display current turn history count and message statistics. |
 | `/events` / `/trajectory` | `/events` | Inspect granular step-by-step trajectory events recorded in the session. |
 | `/export <path>` | `/export log.jsonl` | Export session trajectory events to a JSONL log file. |
-| `/tools` | `/tools` | List currently registered Python tools and their signatures. |
+| `/tools` | `/tools` | List registered local and MCP tools. |
+| `/mcp <subcommand>` | `/mcp list`, `/mcp connect` | Manage MCP servers interactively (connect, disconnect, list, tools, load). |
 | `/info` | `/info` | Display active GCP Project ID, location, model, and session settings. |
 | `/help` | `/help` | Display interactive commands help table. |
 | `/exit` / `/quit` | `/exit` | Exit the interactive session (exports trajectory if `--trace` was provided). |
+
+---
+
+## Model Context Protocol (MCP) Support
+
+`harnessfun` includes full support for the **Model Context Protocol (MCP)**, allowing your harness to connect to external MCP servers, discover tools, and call them natively using either Gemini or Claude models.
+
+### 1. Interactive `/mcp` Slash Commands
+
+Within the interactive chat REPL (`harnessfun chat`), you can manage MCP servers on the fly:
+
+- **List connected servers:**
+  ```text
+  /mcp list
+  ```
+- **Connect a stdio MCP server:**
+  ```text
+  /mcp connect sqlite uvx mcp-server-sqlite --db-path ./mydata.db
+  ```
+- **Connect an SSE / HTTP MCP server:**
+  ```text
+  /mcp connect-url web http://localhost:8000/sse
+  ```
+- **Inspect discovered MCP tools:**
+  ```text
+  /mcp tools
+  /mcp tools sqlite
+  ```
+- **Disconnect a server and unregister its tools:**
+  ```text
+  /mcp disconnect sqlite
+  ```
+- **Batch load servers from a config file:**
+  ```text
+  /mcp load ./mcp_servers.json
+  ```
+
+### 2. Loading MCP Servers at Startup
+
+You can preload MCP servers by passing the `--mcp-config` option to `run` or `chat`:
+
+```bash
+harnessfun chat --mcp-config ./mcp_servers.json
+harnessfun run "Query table users" --mcp-config ./mcp_servers.json
+```
+
+**Example `mcp_servers.json` configuration:**
+```json
+{
+  "mcpServers": {
+    "sqlite": {
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "./test.db"]
+    },
+    "remote_service": {
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
 
 
 ---

@@ -8,7 +8,7 @@ from google.auth.transport.requests import Request
 import httpx
 
 from harnessfun.config import verify_gcp_adc
-from harnessfun.models import Message, ProviderResponse, ToolCall
+from harnessfun.models import Message, ProviderResponse, ToolCall, ToolDefinition
 from harnessfun.providers.base import BaseLLMProvider
 
 # Try to import AnthropicVertex if the official SDK is installed
@@ -108,8 +108,18 @@ class VertexAnthropicProvider(BaseLLMProvider):
             return "object"
         return "string"
 
-    def _convert_tool_to_anthropic_schema(self, func: Callable) -> Dict[str, Any]:
-        """Converts a Python callable into Anthropic's tool JSON schema."""
+    def _convert_tool_to_anthropic_schema(self, tool: Any) -> Dict[str, Any]:
+        """Converts a ToolDefinition, dict, or Python callable into Anthropic's tool JSON schema."""
+        if isinstance(tool, ToolDefinition):
+            return {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.parameters,
+            }
+        if isinstance(tool, dict):
+            return tool
+
+        func = tool
         sig = inspect.signature(func)
         doc = (func.__doc__ or f"Tool function {func.__name__}").strip()
         properties: Dict[str, Any] = {}
@@ -204,7 +214,7 @@ class VertexAnthropicProvider(BaseLLMProvider):
     def generate(
         self,
         messages: List[Message],
-        tools: List[Callable],
+        tools: List[Any],
         model: str,
         system_instruction: str
     ) -> ProviderResponse:

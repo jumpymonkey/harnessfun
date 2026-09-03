@@ -1,4 +1,5 @@
 import json
+import shlex
 import sys
 import click
 from rich.console import Console
@@ -13,6 +14,7 @@ from harnessfun.config import (
     verify_gcp_adc,
 )
 from harnessfun.harness import UniversalHarness
+from harnessfun.mcp import MCPClientManager
 from harnessfun.providers import (
     BaseLLMProvider,
     GCPGeminiProvider,
@@ -89,6 +91,157 @@ def stream_turn_to_console(harness: UniversalHarness, prompt: str) -> None:
                     border_style="red",
                 )
             )
+
+
+def _show_mcp_help() -> None:
+    """Displays interactive help for /mcp subcommands."""
+    table = Table(title="Interactive MCP (Model Context Protocol) Commands")
+    table.add_column("Command", style="cyan")
+    table.add_column("Description")
+    table.add_row("/mcp list", "List all configured MCP servers and their connection statuses.")
+    table.add_row("/mcp connect <name> <cmd> [args...]", "Connect to a stdio MCP server (e.g. /mcp connect sqlite uvx mcp-server-sqlite --db-path ./test.db).")
+    table.add_row("/mcp connect-url <name> <url>", "Connect to an SSE/HTTP MCP server (e.g. /mcp connect-url web http://localhost:8000/sse).")
+    table.add_row("/mcp disconnect <name>", "Disconnect an MCP server and unregister all its tools.")
+    table.add_row("/mcp tools [server]", "List all tools discovered from active MCP servers.")
+    table.add_row("/mcp load <filepath>", "Load and connect servers declared in a JSON or YAML config file.")
+    table.add_row("/mcp help", "Display this MCP command guide.")
+    console.print(table)
+
+
+def _handle_mcp_command(arg: str, harness: UniversalHarness, mcp_manager: MCPClientManager) -> None:
+    """Processes interactive /mcp slash commands."""
+    if not arg:
+        _show_mcp_help()
+        return
+
+    try:
+        parts = shlex.split(arg)
+    except ValueError as e:
+        console.print(f"[bold red]Command parsing error:[/bold red] {e}")
+        return
+
+    subcmd = parts[0].lower()
+
+    if subcmd in ["help", "-h", "--help"]:
+        _show_mcp_help()
+
+    elif subcmd == "list":
+        servers = mcp_manager.list_servers()
+        if not servers:
+            console.print("[dim]No MCP servers registered yet. Use '/mcp connect' or '/mcp load' to register.[/dim]")
+            return
+
+        table = Table(title="Configured MCP Servers")
+        table.add_column("Server", style="cyan")
+        table.add_column("Transport", style="dim")
+        table.add_column("Target")
+        table.add_column("Status")
+        table.add_column("Tools", style="yellow")
+
+        for s in servers:
+            status_style = "bold green" if s["status"] == "connected" else ("bold red" if s["status"] == "error" else "dim")
+            table.add_row(
+                s["name"],
+                s["transport"],
+                s["target"],
+                f"[{status_style}]{s['status']}[/{status_style}]",
+                f"{s['tool_count']} ({', '.join(s['tools']) if s['tools'] else 'none'})",
+            )
+        console.print(table)
+
+    elif subcmd == "connect":
+        if len(parts) < 3:
+            console.print("[bold red]Usage:[/bold red] /mcp connect <name> <command> [args...]")
+            console.print("[dim]Example: /mcp connect sqlite uvx mcp-server-sqlite --db-path ./mydb.db[/dim]")
+            return
+
+        name = parts[1]
+        command = parts[2]
+        cmd_args = parts[3:]
+
+        console.print(f"[dim]Connecting to MCP server '{name}' via stdio ({command} {' '.join(cmd_args)})...[/dim]")
+        try:
+            tools = mcp_manager.connect_stdio(name=name, command=command, args=cmd_args)
+            for t in tools:
+                harness.registry.register_tool_definition(t)
+            console.print(f"[bold green]✓ Successfully connected to '{name}' ({len(tools)} tools registered):[/bold green]")
+            for t in tools:
+                console.print(f"  • [bold cyan]{t.name}[/bold cyan]: [dim]{t.description}[/dim]")
+        except Exception as e:
+            console.print(f"[bold red]Failed to connect to MCP server '{name}':[/bold red] {e}")
+
+    elif subcmd == "connect-url":
+        if len(parts) < 3:
+            console.print("[bold red]Usage:[/bold red] /mcp connect-url <name> <url>")
+            console.print("[dim]Example: /mcp connect-url web http://localhost:8000/sse[/dim]")
+            return
+
+        name = parts[1]
+        url = parts[2]
+
+        console.print(f"[dim]Connecting to MCP server '{name}' via SSE ({url})...[/dim]")
+        try:
+            tools = mcp_manager.connect_sse(name=name, url=url)
+            for t in tools:
+                harness.registry.register_tool_definition(t)
+            console.print(f"[bold green]✓ Successfully connected to '{name}' ({len(tools)} tools registered):[/bold green]")
+            for t in tools:
+                console.print(f"  • [bold cyan]{t.name}[/bold cyan]: [dim]{t.description}[/dim]")
+        except Exception as e:
+            console.print(f"[bold red]Failed to connect to MCP server '{name}':[/bold red] {e}")
+
+    elif subcmd == "disconnect":
+        if len(parts) < 2:
+            console.print("[bold red]Usage:[/bold red] /mcp disconnect <name>")
+            return
+
+        name = parts[1]
+        removed_count = harness.registry.unregister_server(name)
+        try:
+            disconnected = mcp_manager.disconnect(name)
+            if disconnected or removed_count > 0:
+                console.print(f"[bold green]✓ Disconnected MCP server '{name}' and unregistered {removed_count} tools.[/bold green]")
+            else:
+                console.print(f"[bold yellow]MCP server '{name}' not found or already disconnected.[/bold yellow]")
+        except Exception as e:
+            console.print(f"[bold red]Error disconnecting '{name}':[/bold red] {e}")
+
+    elif subcmd == "tools":
+        server_filter = parts[1] if len(parts) > 1 else None
+        tools = mcp_manager.get_server_tools(server_filter)
+        if not tools:
+            console.print(f"[dim]No tools found for server '{server_filter}'.[/dim]" if server_filter else "[dim]No active MCP tools registered.[/dim]")
+            return
+
+        table = Table(title=f"MCP Tools{' (' + server_filter + ')' if server_filter else ''}")
+        table.add_column("Tool Name", style="cyan")
+        table.add_column("Server", style="magenta")
+        table.add_column("Description")
+        for t in tools:
+            table.add_row(t.name, t.server_name or "local", t.description)
+        console.print(table)
+
+    elif subcmd == "load":
+        if len(parts) < 2:
+            console.print("[bold red]Usage:[/bold red] /mcp load <filepath.json|.yaml>")
+            return
+
+        filepath = parts[1]
+        try:
+            console.print(f"[dim]Loading MCP servers from {filepath}...[/dim]")
+            results = mcp_manager.load_config_file(filepath)
+            total_tools = 0
+            for srv_name, srv_tools in results.items():
+                for t in srv_tools:
+                    harness.registry.register_tool_definition(t)
+                total_tools += len(srv_tools)
+                console.print(f"  • [bold green]✓[/bold green] Server '{srv_name}': {len(srv_tools)} tools")
+            console.print(f"[bold green]✓ Successfully loaded {len(results)} servers ({total_tools} total tools).[/bold green]")
+        except Exception as e:
+            console.print(f"[bold red]Failed to load MCP configuration:[/bold red] {e}")
+
+    else:
+        console.print(f"[bold red]Unknown MCP subcommand:[/bold red] '{subcmd}'. Type '/mcp help' for options.")
 
 
 @click.group(invoke_without_command=True)
@@ -170,8 +323,10 @@ def models_list(project, location, model_location):
 @click.option("--location", "-l", help="GCP Location/Region.")
 @click.option("--model-location", help="Location used to reach models (default: global for Gemini, us-east5 for Claude).")
 @click.option("--trace", help="Optional filepath to export execution trajectory JSONL log.")
-def run(prompt, model, project, location, model_location, trace):
+@click.option("--mcp-config", help="Optional filepath to JSON or YAML MCP configuration file.")
+def run(prompt, model, project, location, model_location, trace, mcp_config):
     """Execute a single one-shot prompt."""
+    mcp_manager = MCPClientManager()
     try:
         cfg = load_config(
             project_id=project,
@@ -180,8 +335,14 @@ def run(prompt, model, project, location, model_location, trace):
             model=model
         )
         provider = get_provider(cfg.active_model, cfg.project_id, cfg.model_location)
-        harness = UniversalHarness(provider=provider, config=cfg)
-        
+        harness = UniversalHarness(provider=provider, config=cfg, registry=default_registry, mcp_manager=mcp_manager)
+
+        if mcp_config:
+            loaded = mcp_manager.load_config_file(mcp_config)
+            for srv_name, srv_tools in loaded.items():
+                for t in srv_tools:
+                    harness.registry.register_tool_definition(t)
+
         provider_name = "Anthropic Claude (Vertex AI)" if is_anthropic_model(cfg.active_model) else "Google Gemini"
         console.print(f"[dim]Running model '{cfg.active_model}' [{provider_name}] on project '{cfg.project_id}'...[/dim]\n")
         stream_turn_to_console(harness, prompt)
@@ -191,6 +352,8 @@ def run(prompt, model, project, location, model_location, trace):
     except Exception as e:
         console.print(f"[bold red]Execution Error:[/bold red] {e}")
         sys.exit(1)
+    finally:
+        mcp_manager.close()
 
 
 @cli.command()
@@ -199,8 +362,10 @@ def run(prompt, model, project, location, model_location, trace):
 @click.option("--location", "-l", help="GCP Location/Region.")
 @click.option("--model-location", help="Location used to reach models (default: global for Gemini, us-east5 for Claude).")
 @click.option("--trace", help="Optional filepath to export execution trajectory JSONL log on exit.")
-def chat(model, project, location, model_location, trace):
+@click.option("--mcp-config", help="Optional filepath to JSON or YAML MCP configuration file.")
+def chat(model, project, location, model_location, trace, mcp_config):
     """Start an interactive REPL session with on-the-fly model switching."""
+    mcp_manager = MCPClientManager()
     try:
         cfg = load_config(
             project_id=project,
@@ -209,10 +374,21 @@ def chat(model, project, location, model_location, trace):
             model=model
         )
         provider = get_provider(cfg.active_model, cfg.project_id, cfg.model_location)
-        harness = UniversalHarness(provider=provider, config=cfg, registry=default_registry)
+        harness = UniversalHarness(provider=provider, config=cfg, registry=default_registry, mcp_manager=mcp_manager)
     except Exception as e:
         console.print(f"[bold red]Failed to initialize harness session:[/bold red] {e}")
+        mcp_manager.close()
         sys.exit(1)
+
+    if mcp_config:
+        try:
+            loaded = mcp_manager.load_config_file(mcp_config)
+            for srv_name, srv_tools in loaded.items():
+                for t in srv_tools:
+                    harness.registry.register_tool_definition(t)
+            console.print(f"[bold green]✓ Preloaded MCP configuration from '{mcp_config}'[/bold green]")
+        except Exception as ex:
+            console.print(f"[bold red]Failed to load MCP configuration '{mcp_config}':[/bold red] {ex}")
 
     provider_name = "Anthropic Claude (Vertex AI)" if is_anthropic_model(cfg.active_model) else "Google Gemini"
 
@@ -225,13 +401,14 @@ def chat(model, project, location, model_location, trace):
     )
     console.print(Panel(banner, title="Session Started", border_style="cyan"))
 
-    def _export_trace_if_requested():
+    def _cleanup_and_export():
         if trace:
             try:
                 harness.export_trajectory_jsonl(trace)
                 console.print(f"[bold green]✓ Session trajectory log saved to:[/bold green] {trace}")
             except Exception as ex:
                 console.print(f"[bold red]Failed to save trajectory log:[/bold red] {ex}")
+        harness.close()
 
     # Interactive Loop
     while True:
@@ -250,7 +427,7 @@ def chat(model, project, location, model_location, trace):
 
                 if command in ["/exit", "/quit"]:
                     console.print("[dim]Exiting interactive session. Goodbye![/dim]")
-                    _export_trace_if_requested()
+                    _cleanup_and_export()
                     break
 
                 elif command == "/help":
@@ -264,7 +441,8 @@ def chat(model, project, location, model_location, trace):
                     help_table.add_row("/events, /trajectory", "View step-by-step trajectory events for current session.")
                     help_table.add_row("/export <file>", "Export session trajectory as a JSONL log file.")
                     help_table.add_row("/system <prompt>", "View or update system instructions.")
-                    help_table.add_row("/tools", "List registered local Python tools.")
+                    help_table.add_row("/tools", "List registered local and MCP tools.")
+                    help_table.add_row("/mcp <subcommand>", "Manage MCP servers interactively (connect, disconnect, list, tools, load).")
                     help_table.add_row("/info", "Display active GCP session & provider information.")
                     help_table.add_row("/help", "Show this help table.")
                     help_table.add_row("/exit, /quit", "Exit REPL session.")
@@ -359,10 +537,14 @@ def chat(model, project, location, model_location, trace):
                     tools_info = harness.registry.get_info()
                     tool_table = Table(title="Registered Tools")
                     tool_table.add_column("Tool Name", style="cyan")
+                    tool_table.add_column("Origin", style="magenta")
                     tool_table.add_column("Description")
                     for t in tools_info:
-                        tool_table.add_row(t["name"], t["description"])
+                        tool_table.add_row(t["name"], t.get("server") or "local", t["description"])
                     console.print(tool_table)
+
+                elif command == "/mcp":
+                    _handle_mcp_command(arg, harness, mcp_manager)
 
                 elif command == "/info":
                     p_name = "Anthropic Claude (Vertex AI)" if is_anthropic_model(harness.config.active_model) else "Google Gemini"
@@ -384,8 +566,8 @@ def chat(model, project, location, model_location, trace):
                 stream_turn_to_console(harness, user_input)
 
         except KeyboardInterrupt:
-            console.print("\n[dim]Session interrupted. Type /exit to quit.[/dim]")
-            _export_trace_if_requested()
+            console.print("\n[dim]Session interrupted. Exiting...[/dim]")
+            _cleanup_and_export()
             break
         except Exception as e:
             console.print(f"\n[bold red]Error:[/bold red] {e}")

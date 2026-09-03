@@ -1,8 +1,8 @@
 """Abstract Base Class for harnessfun LLM Providers."""
 
 from abc import ABC, abstractmethod
-from typing import Callable, List
-from harnessfun.models import Message, ProviderResponse
+from typing import Any, Callable, List, Union
+from harnessfun.models import Message, ProviderResponse, ToolDefinition
 
 
 class BaseLLMProvider(ABC):
@@ -12,7 +12,7 @@ class BaseLLMProvider(ABC):
     def generate(
         self,
         messages: List[Message],
-        tools: List[Callable],
+        tools: List[Union[Callable, ToolDefinition, Any]],
         model: str,
         system_instruction: str
     ) -> ProviderResponse:

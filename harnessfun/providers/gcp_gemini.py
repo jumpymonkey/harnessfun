@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, List
 from google import genai
 from google.genai import types
 
-from harnessfun.models import Message, ProviderResponse, ToolCall
+from harnessfun.models import Message, ProviderResponse, ToolCall, ToolDefinition
 from harnessfun.providers.base import BaseLLMProvider
 
 
@@ -100,17 +100,25 @@ class GCPGeminiProvider(BaseLLMProvider):
                 if parts:
                     contents.append(types.Content(role="user", parts=parts))
 
-        # 2. Convert Python callables into FunctionDeclarations to avoid SDK AFC interference
+        # 2. Convert ToolDefinitions / Python callables into FunctionDeclarations
         gemini_tools = None
         if tools:
             func_decls = []
             for t in tools:
-                if callable(t):
+                if isinstance(t, ToolDefinition):
                     func_decls.append(
-                        types.FunctionDeclaration.from_callable(callable=t, client=self.client)
+                        types.FunctionDeclaration(
+                            name=t.name,
+                            description=t.description,
+                            parameters=t.parameters,
+                        )
                     )
                 elif isinstance(t, types.FunctionDeclaration):
                     func_decls.append(t)
+                elif callable(t):
+                    func_decls.append(
+                        types.FunctionDeclaration.from_callable(callable=t, client=self.client)
+                    )
             if func_decls:
                 gemini_tools = [types.Tool(function_declarations=func_decls)]
 

@@ -22,10 +22,12 @@ class UniversalHarness:
         config: SessionConfig,
         registry: Optional[ToolRegistry] = None,
         on_event: Optional[Callable[[HarnessEvent], None]] = None,
+        mcp_manager: Optional[Any] = None,
     ):
         self.provider = provider
         self.config = config
         self.registry = registry or default_registry
+        self.mcp_manager = mcp_manager
         self.messages: List[Message] = []
         self.events: List[HarnessEvent] = []
         self.on_event = on_event
@@ -63,7 +65,10 @@ class UniversalHarness:
     def run_turn_stream(self, user_prompt: str) -> Generator[HarnessEvent, None, str]:
         """Executes a multi-step turn, yielding HarnessEvents in real time."""
         self.messages.append(Message(role="user", content=user_prompt))
-        tools_list = self.registry.get_functions_list()
+        if hasattr(self.registry, "get_tools"):
+            tools_list = self.registry.get_tools()
+        else:
+            tools_list = self.registry.get_functions_list()
 
         for step in range(self.config.max_steps):
             yield self._emit(
@@ -233,3 +238,12 @@ class UniversalHarness:
                     "timestamp": event.timestamp,
                 }
                 f.write(json.dumps(record) + "\n")
+
+    def close(self) -> None:
+        """Shuts down MCP connections and releases harness resources."""
+        if self.mcp_manager:
+            try:
+                self.mcp_manager.close()
+            except Exception:
+                pass
+
